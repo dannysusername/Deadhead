@@ -1,0 +1,7 @@
+# Dad's week — copy flights from the calendar, one per line.
+# Format: from,to,date,departure-time
+# Airport codes: local (ADS), ICAO (KADS), or IATA (DAL) all work.
+
+ADS,DAL,2026-07-15,09:00
+DAL,AUS,2026-07-17,10:00
+AUS,ADS,2026-07-18,15:00

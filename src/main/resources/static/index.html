@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deadhead</title>
+<style>
+  :root { --ink:#1a2332; --muted:#6b7686; --line:#e3e7ee; --good:#0a7d43; --bad:#a33; --bg:#f6f8fb; --card:#fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink:#e8ecf3; --muted:#93a0b4; --line:#2a3444; --bg:#131a24; --card:#1a2332; }
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink);
+         background:var(--bg); padding:28px 16px 48px; }
+  main { max-width:620px; margin:0 auto; }
+  h1 { font-size:1.6rem; letter-spacing:-0.02em; margin-bottom:14px; }
+  #setup { display:flex; gap:10px; margin-bottom:12px; }
+  #setup label { flex:1; font-size:.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  #setup input { display:block; width:100%; margin-top:4px; padding:9px 12px; font-size:1rem;
+                 border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink);
+                 text-transform:uppercase; }
+  #rangebar { display:none; align-items:center; gap:8px; background:var(--card);
+              border:1px solid var(--line); border-radius:12px; padding:8px 10px; margin-bottom:12px; }
+  #rangebar button { background:none; border:none; color:var(--ink); font-size:1.3rem;
+                     cursor:pointer; padding:4px 12px; border-radius:8px; }
+  #rangebar button:hover { background:var(--bg); }
+  #rangebar input { flex:1; border:none; background:none; color:var(--ink); font:inherit;
+                    font-variant-numeric:tabular-nums; text-align:center; }
+  #drop { border:2px dashed var(--line); border-radius:16px; padding:36px 20px;
+          text-align:center; color:var(--muted); cursor:pointer; font-size:1.05rem;
+          transition:border-color .15s, background .15s; }
+  #drop.over { border-color:var(--good); background:rgba(10,125,67,.06); }
+  #drop small { display:block; margin-top:6px; font-size:.8rem; }
+  #status { margin:14px 2px; color:var(--muted); }
+  #status.err { color:var(--bad); }
+  #flightlist { display:none; }
+  .flight { display:flex; gap:10px; padding:9px 16px; border-top:1px solid var(--line); align-items:center; }
+  .flight:first-of-type { border-top:none; }
+  .flight input { width:17px; height:17px; accent-color:var(--good); flex-shrink:0; }
+  .flight .fwhen { color:var(--muted); font-size:.83rem; font-variant-numeric:tabular-nums; min-width:98px; }
+  .flight .froute { font-weight:600; min-width:112px; font-variant-numeric:tabular-nums; }
+  .flight .fwho { flex:1; color:var(--muted); font-size:.85rem; overflow:hidden;
+                  text-overflow:ellipsis; white-space:nowrap; }
+  .tag { font-size:.7rem; color:var(--bad); border:1px solid var(--bad); border-radius:6px;
+         padding:1px 6px; flex-shrink:0; }
+  .hero { background:var(--good); color:#fff; border-radius:14px; padding:18px 20px; margin:18px 0 14px; }
+  .hero .big { font-size:2rem; font-weight:700; }
+  .hero .cap { opacity:.9; font-size:.9rem; margin-top:2px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:14px;
+            margin:14px 0; overflow:hidden; }
+  section h2, summary { font-size:.95rem; font-weight:600; padding:14px 20px 10px; }
+  summary { cursor:pointer; color:var(--muted); padding-bottom:14px; }
+  .step { display:flex; gap:12px; padding:10px 20px; border-top:1px solid var(--line); align-items:baseline; }
+  .when { color:var(--muted); font-variant-numeric:tabular-nums; font-size:.85rem; min-width:76px; flex-shrink:0; }
+  .what { flex:1; font-size:.95rem; }
+  .cost { font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+  .total { display:flex; justify-content:space-between; padding:13px 20px; border-top:2px solid var(--ink); font-weight:700; }
+  .habit .cost, .habit .total { color:var(--bad); }
+  #update { display:none; margin-top:18px; background:none; border:1px solid var(--line); color:var(--muted);
+            border-radius:10px; padding:8px 14px; font-size:.9rem; cursor:pointer; }
+  #settingsBox { background:var(--card); border:1px solid var(--line); border-radius:12px; margin-bottom:12px; }
+  #settingsBox summary { font-size:.85rem; padding:10px 16px; }
+  #settingsGrid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; padding:4px 16px 14px; }
+  #settingsGrid label { font-size:.72rem; color:var(--muted); }
+  #settingsGrid input { display:block; width:100%; margin-top:3px; padding:7px 10px; font-size:.95rem;
+                        border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); }
+  #calRow { display:flex; gap:8px; padding:0 16px 14px; align-items:end; }
+  #calRow label { flex:1; font-size:.72rem; color:var(--muted); }
+  #calRow input { display:block; width:100%; margin-top:3px; padding:7px 10px; font-size:.9rem;
+                  border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); }
+  #syncBtn { border:1px solid var(--line); background:var(--bg); color:var(--ink); border-radius:8px;
+             padding:8px 14px; font-size:.9rem; cursor:pointer; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Deadhead</h1>
+
+  <div id="setup">
+    <label>Home base<input id="home" placeholder="KTMB" spellcheck="false"></label>
+    <label>Plane is at
+      <span style="display:flex; gap:6px; margin-top:4px;">
+        <input id="planeAt" placeholder="home" spellcheck="false" style="margin-top:0;">
+        <button id="find" title="Find my plane" style="border:1px solid var(--line); background:var(--card);
+          color:var(--ink); border-radius:10px; padding:0 12px; font-size:1rem; cursor:pointer;">✈</button>
+      </span>
+    </label>
+  </div>
+
+  <details id="settingsBox"><summary>Settings</summary>
+    <div id="settingsGrid">
+      <label>Hotel / night $<input data-key="hotelPerNight" inputmode="decimal"></label>
+      <label>Fuel $/hr<input data-key="fuelPerHour" inputmode="decimal"></label>
+      <label>Engine $/hr<input data-key="enginePerHour" inputmode="decimal"></label>
+      <label>Your time $/hr<input data-key="timeValuePerHour" inputmode="decimal"></label>
+      <label>Uber base $<input data-key="uberBase" inputmode="decimal"></label>
+      <label>Uber $/mile<input data-key="uberPerMile" inputmode="decimal"></label>
+      <label>Cruise kts<input data-key="cruiseKts" inputmode="decimal"></label>
+      <label>Tail #<input data-key="tail"></label>
+      <label>Home base<input data-key="home"></label>
+    </div>
+    <div id="calRow">
+      <label>Calendar link (webcal)<input data-key="calendarUrl" placeholder="webcal://p12-caldav.icloud.com/published/2/…"></label>
+      <button id="syncBtn">Sync</button>
+    </div>
+  </details>
+
+  <div id="rangebar">
+    <button id="prev">‹</button>
+    <input type="date" id="from">
+    <input type="date" id="to">
+    <button id="next">›</button>
+  </div>
+
+  <section id="flightlist"></section>
+
+  <div id="drop">Drop your calendar here<small>.ics — parsed once, saved for good</small></div>
+  <input type="file" id="file" accept=".ics,text/calendar" hidden>
+  <div id="status"></div>
+  <div id="result"></div>
+  <button id="update">Update calendar</button>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const drop = $('drop'), file = $('file'), status = $('status'), result = $('result');
+const homeIn = $('home'), planeIn = $('planeAt');
+const fromIn = $('from'), toIn = $('to');
+
+let weeks = [];        // Mondays (ISO) of weeks that have flights
+let flights = [];      // flights in the current range
+let checked = new Set();
+
+homeIn.value = localStorage.getItem('home') || '';
+planeIn.value = localStorage.getItem('planeAt') || '';
+homeIn.onchange = planeIn.onchange = () => { saveInputs(); plan(); };
+fromIn.onchange = toIn.onchange = loadFlights;
+
+drop.onclick = () => file.click();
+file.onchange = () => file.files[0] && importFile(file.files[0]);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => {
+  e.preventDefault(); drop.classList.remove('over');
+  if (e.dataTransfer.files[0]) importFile(e.dataTransfer.files[0]);
+};
+$('update').onclick = () => file.click();
+$('prev').onclick = () => jump(-1);
+$('next').onclick = () => jump(1);
+$('find').onclick = async () => {
+  status.className = '';
+  status.textContent = 'Locating…';
+  try {
+    const res = await fetch('/api/locate');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Not found');
+    planeIn.value = data.airport;
+    saveInputs();
+    status.textContent = `Plane at ${data.airport} — ${data.name} (${data.source})`;
+    plan();
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = err.message;
+  }
+};
+
+// ── settings panel ──────────────────────────────────────────
+async function loadSettings() {
+  const s = await (await fetch('/api/settings')).json();
+  document.querySelectorAll('#settingsBox input[data-key]').forEach(inp => {
+    inp.value = s[inp.dataset.key] ?? '';
+    inp.onchange = async () => {
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [inp.dataset.key]: inp.value }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Save failed');
+        status.className = '';
+        status.textContent = 'Saved.';
+        if (inp.dataset.key === 'home') { homeIn.value = inp.value.toUpperCase(); saveInputs(); }
+        plan();   // costs changed -> the answer may change
+      } catch (err) {
+        status.className = 'err';
+        status.textContent = err.message;
+      }
+    };
+  });
+}
+
+$('syncBtn').onclick = async () => {
+  status.className = '';
+  status.textContent = 'Syncing…';
+  try {
+    const res = await fetch('/api/sync', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Sync failed');
+    status.textContent = `Synced — ${data.newFlights} new flights (${data.events} events).`;
+    await init();
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = err.message;
+  }
+};
+
+init();
+loadSettings();
+
+async function init() {
+  const c = await (await fetch('/api/config')).json();
+  if (!homeIn.value) homeIn.value = c.home;
+  weeks = c.weeks;
+  if (weeks.length) {
+    drop.style.display = 'none';
+    $('update').style.display = 'inline-block';
+    $('rangebar').style.display = 'flex';
+    const w = defaultWeek();
+    setRange(w, addDays(w, 6));
+    loadFlights();
+  }
+}
+
+function defaultWeek() {
+  const monday = mondayOf(new Date().toISOString().slice(0, 10));
+  return weeks.find(w => w >= monday) ?? weeks[weeks.length - 1];
+}
+
+/** ‹ › jump to the previous/next week that actually has flights. */
+function jump(dir) {
+  const cur = fromIn.value;
+  const target = dir < 0
+    ? [...weeks].reverse().find(w => w < cur)
+    : weeks.find(w => w > cur);
+  if (!target) return;
+  setRange(target, addDays(target, 6));
+  loadFlights();
+}
+
+function setRange(a, b) { fromIn.value = a; toIn.value = b; }
+const addDays = (iso, n) => { const d = new Date(iso + 'T12:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+function mondayOf(iso) {
+  const d = new Date(iso + 'T12:00');
+  d.setDate(d.getDate() - (d.getDay() + 6) % 7);
+  return d.toISOString().slice(0, 10);
+}
+
+async function loadFlights() {
+  if (!fromIn.value || !toIn.value) return;
+  result.innerHTML = '';
+  const res = await fetch(`/api/flights?from=${fromIn.value}&to=${toIn.value}`);
+  flights = await res.json();
+  checked = new Set(flights.filter(f => !f.conflict).map(f => f.id));
+  renderFlights();
+  plan();
+}
+
+function renderFlights() {
+  const list = $('flightlist');
+  if (!flights.length) {
+    list.style.display = 'none';
+    status.className = '';
+    status.textContent = 'No flights in this range.';
+    return;
+  }
+  list.style.display = 'block';
+  list.innerHTML = flights.map(f => `
+    <label class="flight">
+      <input type="checkbox" data-id="${f.id}" ${checked.has(f.id) ? 'checked' : ''}>
+      <span class="fwhen">${fmtDep(f.departure)}</span>
+      <span class="froute">${short(f.from)} → ${short(f.to)}</span>
+      <span class="fwho">${esc(f.text)}</span>
+      ${f.conflict ? '<span class="tag">conflict</span>' : ''}
+    </label>`).join('');
+  list.querySelectorAll('input').forEach(cb => cb.onchange = () => {
+    cb.checked ? checked.add(cb.dataset.id) : checked.delete(cb.dataset.id);
+    plan();
+  });
+}
+
+const short = c => c.length === 4 && c.startsWith('K') ? c.slice(1) : c;
+function fmtDep(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+       + ' ' + iso.slice(11, 16);
+}
+
+async function importFile(f) {
+  saveInputs();
+  status.className = '';
+  status.textContent = 'Importing… (first time can take a minute)';
+  result.innerHTML = '';
+  try {
+    const form = new FormData();
+    form.append('file', f);
+    form.append('home', homeIn.value.trim());
+    const res = await fetch('/api/import', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Import failed');
+    status.textContent = `Saved ${data.newFlights} new flights (${data.events} events scanned).`;
+    await init();
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = err.message;
+  }
+}
+
+async function plan() {
+  if (!flights.length) return;
+  if (!checked.size) { result.innerHTML = ''; status.textContent = 'Nothing checked.'; return; }
+  status.className = '';
+  status.textContent = 'Planning…';
+  try {
+    const res = await fetch('/api/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ids: [...checked],
+        home: homeIn.value.trim(),
+        planeAt: planeIn.value.trim(),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Something went wrong');
+    render(data);
+    status.textContent = '';
+  } catch (err) {
+    result.innerHTML = '';
+    status.className = 'err';
+    status.textContent = err.message;
+  }
+}
+
+function saveInputs() {
+  localStorage.setItem('home', homeIn.value.trim());
+  localStorage.setItem('planeAt', planeIn.value.trim());
+}
+
+const money = n => '$' + n.toLocaleString();
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function render(d) {
+  result.innerHTML = `
+    <div class="hero">
+      <div class="big">Save ${money(d.savings)}</div>
+      <div class="cap">${money(d.optimal.total)} vs ${money(d.habit.total)} flying home every night</div>
+    </div>
+    <section>
+      <h2>Best plan — ${money(d.optimal.total)}</h2>
+      ${steps(d.optimal)}
+      <div class="total"><span>Total</span><span>${money(d.optimal.total)}</span></div>
+    </section>
+    <section class="habit"><details>
+      <summary>Old way — ${money(d.habit.total)}</summary>
+      ${steps(d.habit)}
+      <div class="total"><span>Total</span><span>${money(d.habit.total)}</span></div>
+    </details></section>`;
+}
+
+function steps(plan) {
+  return plan.steps.map(s => `
+    <div class="step">
+      <span class="when">${s.when}</span>
+      <span class="what">${s.icon} ${esc(s.text)}</span>
+      <span class="cost">${s.cost ? money(s.cost) : '—'}</span>
+    </div>`).join('');
+}
+</script>
+</body>
+</html>

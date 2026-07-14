@@ -1,0 +1,52 @@
+name: CI for Deadhead
+on:
+  push: # When code is pushed to these branches
+    branches: [ newfeature, main ]
+  pull_request:
+    branches: [ main ]  # Trigger on PRs to main
+
+jobs:
+  # Workflow for feature branches (2 jobs: feature-build-and-test, main-build-and-deploy)
+  feature-build-and-test:
+    if: github.ref != 'refs/heads/main' # Runs for all branches other than main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history, no shallow clone
+
+      - name: Set up JDK 21 # Uses actions/setup-java to set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven # Caches the local Maven repository to speed up builds
+
+      - name: Build with Maven
+        run: mvn -B -DskipTests package  # Builds the project but skips tests for faster feedback
+      - name: Run Unit Tests
+        run: mvn -B test
+
+  main-build-and-deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history, no shallow clone
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn -B -DskipTests package
+      - name: Deploy to Heroku # Uses the HEROKU_API_KEY secret stored on GitHub secrets to authenticate and deploys to Heroku
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          git remote add heroku https://heroku:${HEROKU_API_KEY}@git.heroku.com/deadhead-planner.git
+          git push heroku main
