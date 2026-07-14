@@ -37,18 +37,20 @@ public class FlightStore {
 
     public record ImportStats(int events, int newEvents, int newFlights, int aiParsed) {}
 
-    private static final Path FILE = Path.of("data/flights.json");
     private static final int AI_BATCH = 80;
 
     private final AirportDb db;
     private final ObjectMapper json;
+    private final BlobStore blobs;
     private final Map<String, Entry> entries = new LinkedHashMap<>();
 
-    public FlightStore(AirportDb db, ObjectMapper json) throws IOException {
+    public FlightStore(AirportDb db, ObjectMapper json, BlobStore blobs) throws IOException {
         this.db = db;
         this.json = json;
-        if (Files.exists(FILE)) {
-            for (Entry e : json.readValue(Files.readAllBytes(FILE), Entry[].class)) {
+        this.blobs = blobs;
+        String stored = blobs.get(BlobStore.FLIGHTS);
+        if (!stored.isBlank()) {
+            for (Entry e : json.readValue(stored, Entry[].class)) {
                 entries.put(e.hash(), e);
             }
         }
@@ -141,8 +143,8 @@ public class FlightStore {
     }
 
     private void save() throws IOException {
-        Files.createDirectories(FILE.getParent());
-        Files.write(FILE, json.writerWithDefaultPrettyPrinter().writeValueAsBytes(entries.values()));
+        blobs.put(BlobStore.FLIGHTS,
+            json.writerWithDefaultPrettyPrinter().writeValueAsString(entries.values()));
     }
 
     private static String hash(IcsParser.Event e) {

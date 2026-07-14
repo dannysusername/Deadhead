@@ -20,8 +20,6 @@ import java.util.Set;
 @Service
 public class SettingsService {
 
-    private static final Path FILE = Path.of("data/costs.properties");
-
     private static final List<String> KEYS = List.of(
         "home", "tail", "hex", "calendarUrl",
         "cruiseKts", "flightOverheadHours", "fuelPerHour", "enginePerHour",
@@ -31,9 +29,11 @@ public class SettingsService {
     private static final Set<String> TEXT_KEYS = Set.of("home", "tail", "hex", "calendarUrl");
 
     private final Properties cfg;
+    private final BlobStore blobs;
 
-    public SettingsService(Properties costs) {
+    public SettingsService(Properties costs, BlobStore blobs) {
         this.cfg = costs;
+        this.blobs = blobs;
     }
 
     public synchronized Map<String, String> all() {
@@ -60,9 +60,9 @@ public class SettingsService {
         return all();
     }
 
-    /** Rewrite only the `key=value` lines, keeping every comment in the file. */
+    /** Rewrite only the `key=value` lines, keeping every comment in the document. */
     private void persist() throws IOException {
-        List<String> lines = Files.exists(FILE) ? Files.readAllLines(FILE) : new ArrayList<>();
+        List<String> lines = new ArrayList<>(blobs.get(BlobStore.COSTS).lines().toList());
         List<String> out = new ArrayList<>();
         var written = new java.util.HashSet<String>();
 
@@ -85,6 +85,6 @@ public class SettingsService {
                 out.add(k + "=" + cfg.getProperty(k));
             }
         }
-        Files.write(FILE, out);
+        blobs.put(BlobStore.COSTS, String.join("\n", out) + "\n");
     }
 }

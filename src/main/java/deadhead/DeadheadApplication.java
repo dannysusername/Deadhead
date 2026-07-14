@@ -28,9 +28,9 @@ public class DeadheadApplication {
 
     /** Dad's numbers: fuel/hr, hotel, uber rates, time value, default home base. */
     @Bean
-    Properties costs() throws IOException {
+    Properties costs(BlobStore blobs) throws IOException {
         Properties cfg = new Properties();
-        try (Reader r = Files.newBufferedReader(Path.of("data/costs.properties"))) {
+        try (Reader r = new java.io.StringReader(blobs.get(BlobStore.COSTS))) {
             cfg.load(r);
         }
         return cfg;
