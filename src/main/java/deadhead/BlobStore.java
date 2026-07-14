@@ -107,8 +107,19 @@ public class BlobStore {
         }
     }
 
+    /** Cold dynos and fresh databases occasionally fail the first attempt — retry briefly. */
     private Connection connect() throws SQLException {
-        return DriverManager.getConnection(jdbcUrl, user, pass);
+        SQLException last = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                return DriverManager.getConnection(jdbcUrl, user, pass);
+            } catch (SQLException e) {
+                last = e;
+                try { Thread.sleep(1000L * (attempt + 1)); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw e; }
+            }
+        }
+        throw last;
     }
 
     private static String dbGet(Connection c, String key) throws SQLException {
