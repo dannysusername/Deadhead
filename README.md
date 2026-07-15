@@ -7,7 +7,11 @@ week's calendar (`.ics`); after every leg the optimizer weighs the real choices 
 fly the plane home, **leave it there and Uber back**, hotel overnight — and
 returns the provably cheapest plan for the week.
 
-## Run it
+## Try it live
+
+https://deadhead-planner-71dc1c210944.herokuapp.com/login
+
+## Run it locally
 
 ```bash
 mvn spring-boot:run
