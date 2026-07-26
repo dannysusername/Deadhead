@@ -1,6 +1,5 @@
 package deadhead;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -22,9 +21,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The saved-flights database (data/flights.json). Every calendar event is
- * parsed exactly once and cached by a hash of its content — re-importing the
- * same calendar costs nothing, and new events are the only ones parsed.
+ * The saved-flights database, held in memory and persisted by {@link FlightRepo}.
+ * Every calendar event is parsed exactly once and cached by a hash of its
+ * content — re-importing the same calendar costs nothing, and new events are
+ * the only ones parsed.
  *
  * Parsing strategy per event: try the "X04 to TMB" / "VDF->07FA" pattern
  * first (free), fall back to Claude only for titles the pattern can't read.
@@ -40,19 +40,14 @@ public class FlightStore {
     private static final int AI_BATCH = 80;
 
     private final AirportDb db;
-    private final ObjectMapper json;
-    private final BlobStore blobs;
+    private final FlightRepo repo;
     private final Map<String, Entry> entries = new LinkedHashMap<>();
 
-    public FlightStore(AirportDb db, ObjectMapper json, BlobStore blobs) throws IOException {
+    public FlightStore(AirportDb db, FlightRepo repo) throws IOException {
         this.db = db;
-        this.json = json;
-        this.blobs = blobs;
-        String stored = blobs.get(BlobStore.FLIGHTS);
-        if (!stored.isBlank()) {
-            for (Entry e : json.readValue(stored, Entry[].class)) {
-                entries.put(e.hash(), e);
-            }
+        this.repo = repo;
+        for (Entry e : repo.load()) {
+            entries.put(e.hash(), e);
         }
     }
 
@@ -143,8 +138,7 @@ public class FlightStore {
     }
 
     private void save() throws IOException {
-        blobs.put(BlobStore.FLIGHTS,
-            json.writerWithDefaultPrettyPrinter().writeValueAsString(entries.values()));
+        repo.save(entries.values());
     }
 
     private static String hash(IcsParser.Event e) {

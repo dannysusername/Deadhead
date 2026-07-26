@@ -15,23 +15,21 @@ import java.sql.SQLException;
 import java.util.Map;
 
 /**
- * Durable storage for the app's two mutable documents: the parsed-flights
- * database and the cost settings.
+ * Durable storage for the cost settings document, and the Postgres connection
+ * the rest of the app borrows. Flights outgrew this and live in their own
+ * table now — see {@link FlightRepo}.
  *
  * Heroku's dyno disk is wiped on every restart, so file writes don't survive
- * there. When DATABASE_URL is set (Heroku Postgres) this stores each document
- * as a row in a key-value table; locally it stays plain files. First boot on
- * a fresh database is seeded from the committed files, so deploys migrate
- * themselves.
+ * there. When DATABASE_URL is set this stores the document as a row in a
+ * key-value table; locally it stays a plain file. First boot on a fresh
+ * database is seeded from the committed file, so deploys migrate themselves.
  */
 @Service
 public class BlobStore {
 
-    public static final String FLIGHTS = "flights";
     public static final String COSTS = "costs";
 
     private static final Map<String, Path> FILES = Map.of(
-        FLIGHTS, Path.of("data/flights.json"),
         COSTS, Path.of("data/costs.properties"));
 
     private final String jdbcUrl;   // null = file mode
@@ -45,12 +43,14 @@ public class BlobStore {
             user = pass = null;
             return;
         }
-        // Heroku gives postgres://user:pass@host:port/db; JDBC wants its own scheme
+        // Heroku gives postgres://user:pass@host:port/db; JDBC wants its own scheme.
+        // Managed providers (Neon) leave the port off, and getPort() answers -1 for that.
         URI u = URI.create(databaseUrl);
         String[] auth = u.getUserInfo().split(":", 2);
         user = auth[0];
         pass = auth.length > 1 ? auth[1] : "";
-        jdbcUrl = "jdbc:postgresql://" + u.getHost() + ":" + u.getPort() + u.getPath() + "?sslmode=require";
+        int port = u.getPort() == -1 ? 5432 : u.getPort();
+        jdbcUrl = "jdbc:postgresql://" + u.getHost() + ":" + port + u.getPath() + "?sslmode=require";
 
         try (Connection c = connect()) {
             c.createStatement().execute(
@@ -107,8 +107,13 @@ public class BlobStore {
         }
     }
 
+    /** False when there's no DATABASE_URL: everything falls back to files. */
+    boolean usingDb() {
+        return jdbcUrl != null;
+    }
+
     /** Cold dynos and fresh databases occasionally fail the first attempt — retry briefly. */
-    private Connection connect() throws SQLException {
+    Connection connect() throws SQLException {
         SQLException last = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             try {
