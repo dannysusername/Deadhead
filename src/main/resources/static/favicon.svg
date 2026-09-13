@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Deadhead icon">
+  <!-- Deadhead's own palette: slate card #1a2332 / line #2a3444, ink #e8ecf3, muted #93a0b4, green #0a7d43 -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="0%" r="85%">
+      <stop offset="0" stop-color="#0a7d43" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#0a7d43" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="14" y="14" width="172" height="172" rx="28" fill="#1a2332" stroke="#2a3444" stroke-width="2"/>
+  <rect x="14" y="14" width="172" height="172" rx="28" fill="url(#glow)"/>
+
+  <!-- the client leg out: solid green -->
+  <path d="M52 146 Q100 40 148 70" fill="none" stroke="#0a7d43" stroke-width="5" stroke-linecap="round"/>
+  <!-- the empty leg home: the deadhead, dashed and muted -->
+  <path d="M148 70 Q150 150 52 146" fill="none" stroke="#93a0b4" stroke-opacity=".6" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 9"/>
+
+  <circle cx="52" cy="146" r="9" fill="#1a2332" stroke="#0a7d43" stroke-width="4"/>
+  <circle cx="148" cy="70" r="9" fill="#1a2332" stroke="#e8ecf3" stroke-width="4"/>
+
+  <!-- plane at the arc midpoint, nose along the tangent -->
+  <g transform="translate(100 74) rotate(52)">
+    <path d="M0 -26 C4 -26 5 -20 5 -14 L5 -4 L28 8 L28 14 L5 7 L5 18 L12 24 L12 28 L0 25 L-12 28 L-12 24 L-5 18 L-5 7 L-28 14 L-28 8 L-5 -4 L-5 -14 C-5 -20 -4 -26 0 -26 Z" fill="#e8ecf3" stroke="#1a2332" stroke-width="2" stroke-linejoin="round"/>
+  </g>
+</svg>

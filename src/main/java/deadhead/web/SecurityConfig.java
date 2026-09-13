@@ -48,7 +48,8 @@ public class SecurityConfig {
                 .ignoringRequestMatchers("/api/register"))   // no session to protect yet
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/login", "/login.html", "/register", "/register.html",
-                                 "/api/register", "/style.css", "/favicon.ico", "/error")
+                                 "/api/register", "/style.css", "/favicon.ico", "/favicon.svg",
+                                 "/favicon-32.png", "/apple-touch-icon.png", "/error")
                     .permitAll()
                 .anyRequest().authenticated())
             .formLogin(form -> form
