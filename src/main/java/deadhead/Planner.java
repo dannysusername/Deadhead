@@ -37,11 +37,11 @@ public class Planner {
         return trips.stream().filter(t -> t.id().equals(id)).findFirst().orElseThrow();
     }
 
-    /** Done = every trip flown, and both dad and the plane are back home. */
+    /** Done = every trip flown, and both the pilot and the plane are back home. */
     public boolean isGoal(State s) {
         return s.tripsRemaining().isEmpty()
             && s.planeAt().equals(home)
-            && s.dadAt().equals(home);
+            && s.pilotAt().equals(home);
     }
 
     /**
@@ -58,29 +58,29 @@ public class Planner {
     public List<Action> legalActions(State s) {
         List<Action> out = new ArrayList<>();
 
-        // Fly a scheduled trip: dad + plane at the origin, before departure time.
+        // Fly a scheduled trip: pilot + plane at the origin, before departure time.
         // Waiting within the same day is free (he sits at the airport); waiting
         // across a night must go through Overnight so the hotel gets charged.
         for (String id : s.tripsRemaining()) {
             Trip t = tripById(id);
             if (s.planeAt().equals(t.from())
-                    && s.dadAt().equals(t.from())
+                    && s.pilotAt().equals(t.from())
                     && !s.time().isAfter(t.departure())
                     && s.time().toLocalDate().equals(t.departure().toLocalDate())) {
                 out.add(new Action.FlyTrip(t));
             }
         }
 
-        // Deadhead the empty plane somewhere (dad has to be with the plane to fly it).
-        if (s.planeAt().equals(s.dadAt())) {
+        // Deadhead the empty plane somewhere (the pilot has to be with the plane to fly it).
+        if (s.planeAt().equals(s.pilotAt())) {
             for (Airport a : airports) {
                 if (!a.equals(s.planeAt())) out.add(new Action.RepositionPlane(a));
             }
         }
 
-        // Uber/drive: dad moves, plane stays. THE "leave it there" move.
+        // Uber/drive: the pilot moves, plane stays. THE "leave it there" move.
         for (Airport a : airports) {
-            if (!a.equals(s.dadAt())) out.add(new Action.GroundTravel(a));
+            if (!a.equals(s.pilotAt())) out.add(new Action.GroundTravel(a));
         }
 
         // Call it a day.
@@ -107,8 +107,8 @@ public class Planner {
                 costs.flightCost(s.planeAt(), to));
 
             case Action.GroundTravel(Airport to) -> new Result(
-                new State(s.planeAt(), to, s.time().plus(costs.groundTime(s.dadAt(), to)), s.tripsRemaining()),
-                costs.groundCost(s.dadAt(), to));
+                new State(s.planeAt(), to, s.time().plus(costs.groundTime(s.pilotAt(), to)), s.tripsRemaining()),
+                costs.groundCost(s.pilotAt(), to));
 
             case Action.Overnight() -> {
                 // Wake at 08:00 — or earlier if tomorrow has an early departure.
@@ -124,8 +124,8 @@ public class Planner {
                     }
                 }
                 yield new Result(
-                    new State(s.planeAt(), s.dadAt(), nextDay.atTime(wake), s.tripsRemaining()),
-                    costs.overnightCost(s.dadAt()));
+                    new State(s.planeAt(), s.pilotAt(), nextDay.atTime(wake), s.tripsRemaining()),
+                    costs.overnightCost(s.pilotAt()));
             }
         };
     }
@@ -138,9 +138,9 @@ public class Planner {
             case Action.RepositionPlane(Airport to) ->
                 "Deadhead the empty plane " + before.planeAt() + " -> " + to;
             case Action.GroundTravel(Airport to) ->
-                "Uber " + before.dadAt() + " -> " + to + "  (plane stays at " + before.planeAt() + ")";
+                "Uber " + before.pilotAt() + " -> " + to + "  (plane stays at " + before.planeAt() + ")";
             case Action.Overnight() ->
-                before.dadAt().equals(home) ? "Sleep at home" : "Hotel overnight in " + before.dadAt();
+                before.pilotAt().equals(home) ? "Sleep at home" : "Hotel overnight in " + before.pilotAt();
         };
     }
 }

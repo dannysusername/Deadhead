@@ -12,7 +12,7 @@ import java.util.Set;
  */
 public record State(
     Airport planeAt,
-    Airport dadAt,
+    Airport pilotAt,
     LocalDateTime time,
     Set<String> tripsRemaining   // ids of trips not yet flown
 ) {}

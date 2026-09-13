@@ -9,8 +9,8 @@ import java.time.Duration;
  * touching the search at all.
  */
 public interface CostModel {
-    double flightCost(Airport from, Airport to);   // fuel + engine reserve + dad's time
-    double groundCost(Airport from, Airport to);   // uber/rental + dad's time
+    double flightCost(Airport from, Airport to);   // fuel + engine reserve + the pilot's time
+    double groundCost(Airport from, Airport to);   // uber/rental + the pilot's time
     double overnightCost(Airport at);              // hotel, or 0 at home
 
     Duration flightTime(Airport from, Airport to);

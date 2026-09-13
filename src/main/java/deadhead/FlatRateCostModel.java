@@ -6,7 +6,7 @@ import java.util.Map;
 
 /**
  * Napkin-math cost model: a table of leg times plus flat hourly rates.
- * All the numbers here should eventually come from dad, not from us.
+ * Superseded by GeoCostModel; kept as the simplest possible CostModel.
  */
 public class FlatRateCostModel implements CostModel {
 
@@ -16,7 +16,7 @@ public class FlatRateCostModel implements CostModel {
     private final Map<String, Leg> legs = new HashMap<>();
     private final Airport home;
 
-    // The knobs. "timeValue" = what an hour of dad's life is worth to him.
+    // The knobs. "timeValue" = what an hour of the pilot's life is worth to them.
     private final double fuelPerHour = 200;
     private final double engineReservePerHour = 80;   // wear, maintenance fund
     private final double timeValuePerHour = 50;

@@ -58,6 +58,38 @@
   .habit .cost, .habit .total { color:var(--bad); }
   #update { display:none; margin-top:18px; background:none; border:1px solid var(--line); color:var(--muted);
             border-radius:10px; padding:8px 14px; font-size:.9rem; cursor:pointer; }
+  #topbar { display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+            margin-bottom:14px; flex-wrap:wrap; }
+  #topbar h1 { margin-bottom:0; }
+  #account { font-size:.8rem; color:var(--muted); display:flex; align-items:baseline; gap:8px; }
+  #account form { display:inline; }
+  #account button { background:none; border:none; padding:0; font:inherit; color:var(--good);
+                    font-weight:600; cursor:pointer; }
+  #account button:hover { text-decoration:underline; }
+  #hello { background:var(--card); border:1px solid var(--line); border-radius:14px;
+           padding:18px 20px; margin-bottom:14px; color:var(--muted); font-size:.9rem; line-height:1.5; }
+  #hello strong { color:var(--ink); }
+  #hello div + div { margin-top:8px; }
+  #hello[hidden] { display:none; }
+  #keyRow { padding:0 16px 12px; }
+  #keyRow .klabel { font-size:.72rem; color:var(--muted); display:block; margin-bottom:3px; }
+  #keyRow .kline { display:flex; gap:8px; align-items:center; }
+  #keyRow input { flex:1; padding:7px 10px; font-size:.9rem; border:1px solid var(--line);
+                  border-radius:8px; background:var(--bg); color:var(--ink); font-family:inherit; }
+  #keyRow button { border:1px solid var(--line); background:var(--bg); color:var(--ink);
+                   border-radius:8px; padding:8px 14px; font-size:.9rem; cursor:pointer; }
+  #keySaved { display:flex; gap:8px; align-items:center; font-size:.85rem; }
+  #keySaved code { background:var(--bg); border:1px solid var(--line); border-radius:6px;
+                   padding:2px 7px; font-size:.85rem; }
+  #keyForget { border:none; background:none; color:var(--bad); font-size:.78rem;
+               cursor:pointer; padding:0; }
+  #keyForget:hover { text-decoration:underline; }
+  #keyNote { font-size:.72rem; color:var(--muted); margin-top:6px; line-height:1.45; }
+  #keyNote a { color:var(--good); }
+  #dangerRow { display:flex; justify-content:flex-end; padding:0 16px 12px; }
+  #clearBtn { background:none; border:none; color:var(--bad); font:inherit; font-size:.78rem;
+              cursor:pointer; padding:0; }
+  #clearBtn:hover { text-decoration:underline; }
   #settingsBox { background:var(--card); border:1px solid var(--line); border-radius:12px; margin-bottom:12px; }
   #settingsBox summary { font-size:.85rem; padding:10px 16px; }
   #settingsGrid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; padding:4px 16px 14px; }
@@ -74,7 +106,16 @@
 </head>
 <body>
 <main>
-  <h1>Deadhead</h1>
+  <div id="topbar">
+    <h1>Deadhead</h1>
+    <div id="account">
+      <span id="who"></span>
+      <!-- A real POST so logout can't be triggered by a stray link. -->
+      <form method="post" action="/logout"><input type="hidden" name="_csrf" id="logoutCsrf"><button type="submit">Sign out</button></form>
+    </div>
+  </div>
+
+  <div id="hello" hidden></div>
 
   <div id="setup">
     <label>Home base<input id="home" placeholder="KTMB" spellcheck="false"></label>
@@ -103,6 +144,19 @@
       <label>Calendar link (webcal)<input data-key="calendarUrl" placeholder="webcal://p12-caldav.icloud.com/published/2/…"></label>
       <button id="syncBtn">Sync</button>
     </div>
+    <div id="keyRow">
+      <span class="klabel">Your Anthropic API key — lets Claude read plain-English event titles</span>
+      <div class="kline" id="keyEntry">
+        <input id="apiKey" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
+        <button id="keySave" type="button">Save key</button>
+      </div>
+      <div class="kline" id="keySaved" hidden>
+        <span>Key saved <code id="keyHint"></code></span>
+        <button id="keyForget" type="button">Remove</button>
+      </div>
+      <div id="keyNote"></div>
+    </div>
+    <div id="dangerRow"><button id="clearBtn" type="button">Forget every imported flight</button></div>
   </details>
 
   <div id="rangebar">
@@ -123,6 +177,34 @@
 
 <script>
 const $ = id => document.getElementById(id);
+
+/**
+ * Every call to the API goes through here.
+ *   - writes carry the CSRF token the server set as a cookie
+ *   - a 401 means the session lapsed: go sign in again rather than
+ *     rendering "Unexpected token < in JSON" at the pilot
+ */
+function csrfToken() {
+  const c = document.cookie.split('; ').find(x => x.startsWith('XSRF-TOKEN='));
+  return c ? decodeURIComponent(c.split('=').slice(1).join('=')) : '';
+}
+
+async function api(url, options = {}) {
+  const opts = { ...options, headers: { ...(options.headers || {}) } };
+  if (opts.method && opts.method.toUpperCase() !== 'GET') {
+    opts.headers['X-XSRF-TOKEN'] = csrfToken();
+  }
+  const res = await fetch(url, opts);
+  if (res.status === 401) { location.href = '/login'; throw new Error('Session expired.'); }
+  return res;
+}
+
+/** Read a response as JSON, turning an RFC-7807 problem into a thrown Error. */
+async function json(res, fallback) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || fallback);
+  return data;
+}
 const drop = $('drop'), file = $('file'), status = $('status'), result = $('result');
 const homeIn = $('home'), planeIn = $('planeAt');
 const fromIn = $('from'), toIn = $('to');
@@ -151,7 +233,7 @@ $('find').onclick = async () => {
   status.className = '';
   status.textContent = 'Locating…';
   try {
-    const res = await fetch('/api/locate');
+    const res = await api('/api/locate');
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Not found');
     planeIn.value = data.airport;
@@ -166,12 +248,12 @@ $('find').onclick = async () => {
 
 // ── settings panel ──────────────────────────────────────────
 async function loadSettings() {
-  const s = await (await fetch('/api/settings')).json();
+  const s = await (await api('/api/settings')).json();
   document.querySelectorAll('#settingsBox input[data-key]').forEach(inp => {
     inp.value = s[inp.dataset.key] ?? '';
     inp.onchange = async () => {
       try {
-        const res = await fetch('/api/settings', {
+        const res = await api('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ [inp.dataset.key]: inp.value }),
@@ -194,7 +276,7 @@ $('syncBtn').onclick = async () => {
   status.className = '';
   status.textContent = 'Syncing…';
   try {
-    const res = await fetch('/api/sync', { method: 'POST' });
+    const res = await api('/api/sync', { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Sync failed');
     status.textContent = `Synced — ${data.newFlights} new flights (${data.events} events).`;
@@ -205,20 +287,113 @@ $('syncBtn').onclick = async () => {
   }
 };
 
-init();
-loadSettings();
+$('logoutCsrf').value = csrfToken();
+
+// ── the pilot's own Anthropic key ────────────────────────────
+// Billed to them, verified before it is stored, and never sent back
+// to the page again — only a hint of the last four characters.
+function renderKey(hasKey, hint) {
+  $('keyEntry').hidden = hasKey;
+  $('keySaved').hidden = !hasKey;
+  $('keyHint').textContent = hint || '';
+  $('keyNote').innerHTML = hasKey
+    ? 'Free-text titles like “fly the Rosens to Key West” are parsed by Claude and billed to your key. ' +
+      'Each event is parsed once and cached, so re-imports cost nothing.'
+    : 'Optional. Without it, event titles must contain airport codes (ADS, KDAL, AUS…) — ' +
+      'anything else is skipped silently. Get one at ' +
+      '<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.';
+}
+
+$('keySave').onclick = async () => {
+  const value = $('apiKey').value.trim();
+  if (!value) return;
+  const btn = $('keySave');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  status.className = '';
+  status.textContent = 'Verifying your key with Anthropic…';
+  try {
+    const d = await json(await api('/api/apikey', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: value }),
+    }), 'Could not save that key.');
+    $('apiKey').value = '';
+    renderKey(d.ai, d.apiKeyHint);
+    status.textContent = 'Key saved. Free-text calendar titles will be parsed from now on.';
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save key';
+  }
+};
+
+$('keyForget').onclick = async () => {
+  if (!confirm('Remove your API key? Future imports will only read titles containing airport codes.')) return;
+  try {
+    const d = await json(await api('/api/apikey', { method: 'DELETE' }), 'Could not remove the key.');
+    renderKey(d.ai, d.apiKeyHint);
+    status.className = '';
+    status.textContent = 'Key removed.';
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = err.message;
+  }
+};
+
+$('clearBtn').onclick = async () => {
+  if (!confirm('Forget every flight imported into this account? Your calendar is untouched.')) return;
+  try {
+    await json(await api('/api/flights', { method: 'DELETE' }), 'Could not clear the schedule.');
+    location.reload();
+  } catch (err) {
+    status.className = 'err';
+    status.textContent = err.message;
+  }
+};
+
+start();
+
+async function start() {
+  await init();
+  await loadSettings();
+}
 
 async function init() {
-  const c = await (await fetch('/api/config')).json();
-  if (!homeIn.value) homeIn.value = c.home;
+  const c = await json(await api('/api/config'), 'Could not load your account.');
+  $('who').textContent = c.email;
+  renderKey(c.ai, c.apiKeyHint);
+  if (!homeIn.value) homeIn.value = c.home || '';
   weeks = c.weeks;
+
   if (weeks.length) {
+    $('hello').hidden = true;
     drop.style.display = 'none';
     $('update').style.display = 'inline-block';
     $('rangebar').style.display = 'flex';
     const w = defaultWeek();
     setRange(w, addDays(w, 6));
-    loadFlights();
+    await loadFlights();
+  } else {
+    // A brand-new account: say what to do, in the order it has to happen.
+    drop.style.display = 'block';
+    $('update').style.display = 'none';
+    $('rangebar').style.display = 'none';
+    const steps = [];
+    if (!homeIn.value) {
+      steps.push('<strong>Set your home base</strong> — the airport you fly out of. ' +
+                 'KTMB, TMB or MIA-style codes all work.');
+    }
+    steps.push('<strong>Drop in a week\'s calendar</strong> below (an .ics exported from ' +
+               'Apple Calendar, or a from,to,date,time .csv).');
+    steps.push(c.ai
+      ? 'Event titles can be plain English — “fly the Hendersons to Love Field, wheels up 9”.'
+      : 'Titles need an airport code in them (<em>TMB to EYW</em>); anything else is skipped. ' +
+        'To use plain-English titles, add your Anthropic API key under Settings.');
+    $('hello').hidden = false;
+    $('hello').innerHTML = steps.map(t => '<div>' + t + '</div>').join('');
   }
 }
 
@@ -249,7 +424,7 @@ function mondayOf(iso) {
 async function loadFlights() {
   if (!fromIn.value || !toIn.value) return;
   result.innerHTML = '';
-  const res = await fetch(`/api/flights?from=${fromIn.value}&to=${toIn.value}`);
+  const res = await api(`/api/flights?from=${fromIn.value}&to=${toIn.value}`);
   flights = await res.json();
   checked = new Set(flights.filter(f => !f.conflict).map(f => f.id));
   renderFlights();
@@ -295,7 +470,7 @@ async function importFile(f) {
     const form = new FormData();
     form.append('file', f);
     form.append('home', homeIn.value.trim());
-    const res = await fetch('/api/import', { method: 'POST', body: form });
+    const res = await api('/api/import', { method: 'POST', body: form });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Import failed');
     status.textContent = `Saved ${data.newFlights} new flights (${data.events} events scanned).`;
@@ -312,7 +487,7 @@ async function plan() {
   status.className = '';
   status.textContent = 'Planning…';
   try {
-    const res = await fetch('/api/plan', {
+    const res = await api('/api/plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

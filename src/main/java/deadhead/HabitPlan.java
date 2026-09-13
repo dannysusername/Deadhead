@@ -15,7 +15,7 @@ public class HabitPlan {
         State s = start;
         // Plane stranded somewhere from last week? The habit pilot fetches it home first.
         if (!s.planeAt().equals(home)) {
-            if (!s.dadAt().equals(s.planeAt())) {
+            if (!s.pilotAt().equals(s.planeAt())) {
                 s = add(actions, planner, s, new Action.GroundTravel(s.planeAt()));
             }
             s = add(actions, planner, s, new Action.RepositionPlane(home));

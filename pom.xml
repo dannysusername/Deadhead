@@ -35,11 +35,27 @@
       <artifactId>anthropic-java</artifactId>
       <version>2.34.0</version>
     </dependency>
-    <!-- Heroku Postgres — BlobStore persistence (file mode locally) -->
+    <!-- Production database (Heroku/Neon): used when DATABASE_URL is set -->
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
       <scope>runtime</scope>
+    </dependency>
+    <!-- Local/dev database: a real multi-user DB with no server to install -->
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+      <version>3.47.1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
+      <scope>test</scope>
     </dependency>
   </dependencies>
 

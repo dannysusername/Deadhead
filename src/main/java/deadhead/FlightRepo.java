@@ -1,125 +1,91 @@
 package deadhead;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import deadhead.store.Db;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Types;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
 /**
- * Where parsed calendar entries live. On Postgres each entry is its own row in
- * `flights`, so the schedule can be queried with ordinary SQL; with no
- * DATABASE_URL it stays the committed data/flights.json file, as before.
+ * Where parsed calendar entries live — one row per event, per account.
  *
  * A null departure means "already looked at, not a flight". That cache is what
  * stops a re-import from paying Claude twice for the same events, so those rows
  * are load-bearing and are stored just like real flights.
+ *
+ * Every statement here is keyed by user_id. There is deliberately no method to
+ * read or write a flight without one.
  */
 @Service
 public class FlightRepo {
 
-    private static final Path FILE = Path.of("data/flights.json");
+    private static final String COLUMNS = "user_id, hash, seq, start_ts, text, origin, dest, departure";
 
-    private static final String COLUMNS = "seq, hash, start_ts, text, origin, dest, departure";
+    private final Db db;
 
-    private final BlobStore blobs;
-    private final ObjectMapper json;
-
-    FlightRepo(BlobStore blobs, ObjectMapper json) throws IOException {
-        this.blobs = blobs;
-        this.json = json;
-        if (!blobs.usingDb()) return;
-
-        try (Connection c = blobs.connect(); Statement st = c.createStatement()) {
-            st.execute("""
-                CREATE TABLE IF NOT EXISTS flights (
-                  seq       INTEGER NOT NULL,
-                  hash      TEXT PRIMARY KEY,
-                  start_ts  TIMESTAMP NOT NULL,
-                  text      TEXT NOT NULL,
-                  origin    TEXT,
-                  dest      TEXT,
-                  departure TIMESTAMP)""");
-            st.execute("CREATE INDEX IF NOT EXISTS flights_departure_idx ON flights (departure)");
-            seedFromFile(c);
-        } catch (SQLException e) {
-            throw new IllegalStateException("flights table setup failed: " + e.getMessage(), e);
-        }
+    public FlightRepo(Db db) {
+        this.db = db;
     }
 
-    /** Fresh database + committed data file -> migrate it in once, like BlobStore does for costs. */
-    private void seedFromFile(Connection c) throws SQLException, IOException {
-        if (!Files.exists(FILE)) return;
-        try (Statement st = c.createStatement();
-             ResultSet rs = st.executeQuery("SELECT count(*) FROM flights")) {
-            if (rs.next() && rs.getInt(1) > 0) return;
-        }
-        List<FlightStore.Entry> seed = readFile();
-        if (seed.isEmpty()) return;
-        write(c, seed);
-        System.out.println("seeded " + seed.size() + " flights into Postgres from " + FILE);
-    }
-
-    // ── reading ──────────────────────────────────────────────────
-
-    synchronized List<FlightStore.Entry> load() throws IOException {
-        if (!blobs.usingDb()) return readFile();
-        try (Connection c = blobs.connect();
-             Statement st = c.createStatement();
-             ResultSet rs = st.executeQuery("SELECT " + COLUMNS + " FROM flights ORDER BY seq")) {
-            List<FlightStore.Entry> out = new ArrayList<>();
-            while (rs.next()) {
-                out.add(new FlightStore.Entry(
-                    rs.getString("hash"),
-                    text(rs, "start_ts"),
-                    rs.getString("text"),
-                    rs.getString("origin"),
-                    rs.getString("dest"),
-                    text(rs, "departure")));
+    public List<FlightStore.Entry> load(long userId) {
+        try (Connection c = db.connect();
+             PreparedStatement st = c.prepareStatement(
+                 "SELECT hash, start_ts, text, origin, dest, departure "
+               + "FROM flights WHERE user_id = ? ORDER BY seq")) {
+            st.setLong(1, userId);
+            try (ResultSet rs = st.executeQuery()) {
+                List<FlightStore.Entry> out = new ArrayList<>();
+                while (rs.next()) {
+                    out.add(new FlightStore.Entry(
+                        rs.getString("hash"),
+                        rs.getString("start_ts"),
+                        rs.getString("text"),
+                        rs.getString("origin"),
+                        rs.getString("dest"),
+                        rs.getString("departure")));
+                }
+                return out;
             }
-            return out;
         } catch (SQLException e) {
             throw new IllegalStateException("flights read failed: " + e.getMessage(), e);
         }
     }
 
-    /** Timestamps travel as the ISO strings the rest of the app already parses. */
-    private static String text(ResultSet rs, String column) throws SQLException {
-        LocalDateTime t = rs.getObject(column, LocalDateTime.class);
-        return t == null ? null : t.toString();
-    }
-
-    private List<FlightStore.Entry> readFile() throws IOException {
-        if (!Files.exists(FILE)) return List.of();
-        String stored = Files.readString(FILE);
-        if (stored.isBlank()) return List.of();
-        return List.of(json.readValue(stored, FlightStore.Entry[].class));
-    }
-
-    // ── writing ──────────────────────────────────────────────────
-
-    synchronized void save(Collection<FlightStore.Entry> entries) throws IOException {
-        if (!blobs.usingDb()) {
-            Files.createDirectories(FILE.getParent());
-            Files.writeString(FILE, json.writerWithDefaultPrettyPrinter().writeValueAsString(entries));
-            return;
-        }
-        try (Connection c = blobs.connect()) {
+    /**
+     * Add the entries this import produced. Existing rows are left alone
+     * rather than rewritten wholesale — an import only ever learns about
+     * events it hasn't seen, so there is nothing in the old rows to update,
+     * and not touching them keeps one account's import off everyone else's
+     * rows even under a concurrent write.
+     */
+    public void add(long userId, Collection<FlightStore.Entry> entries) {
+        if (entries.isEmpty()) return;
+        try (Connection c = db.connect()) {
             boolean autoCommit = c.getAutoCommit();
             c.setAutoCommit(false);
             try {
-                write(c, entries);
+                int seq = nextSeq(c, userId);
+                try (PreparedStatement st = c.prepareStatement(
+                    "INSERT INTO flights (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                  + "ON CONFLICT (user_id, hash) DO NOTHING")) {
+                    for (FlightStore.Entry e : entries) {
+                        st.setLong(1, userId);
+                        st.setString(2, e.hash());
+                        st.setInt(3, seq++);
+                        st.setString(4, e.start());
+                        st.setString(5, e.text());
+                        st.setString(6, e.from());
+                        st.setString(7, e.to());
+                        st.setString(8, e.departure());
+                        st.addBatch();
+                    }
+                    st.executeBatch();
+                }
                 c.commit();
             } catch (SQLException e) {
                 c.rollback();
@@ -132,29 +98,24 @@ public class FlightRepo {
         }
     }
 
-    /**
-     * The in-memory map is the whole truth, so the table is replaced wholesale —
-     * same semantics as rewriting the document, minus the blob.
-     */
-    private static void write(Connection c, Collection<FlightStore.Entry> entries) throws SQLException {
-        try (Statement st = c.createStatement()) {
-            st.execute("DELETE FROM flights");
+    /** Wipe one account's schedule — the "start over" button, and how tests reset. */
+    public void deleteAll(long userId) {
+        try (Connection c = db.connect();
+             PreparedStatement st = c.prepareStatement("DELETE FROM flights WHERE user_id = ?")) {
+            st.setLong(1, userId);
+            st.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("flights delete failed: " + e.getMessage(), e);
         }
+    }
+
+    private static int nextSeq(Connection c, long userId) throws SQLException {
         try (PreparedStatement st = c.prepareStatement(
-            "INSERT INTO flights (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?)")) {
-            int seq = 0;
-            for (FlightStore.Entry e : entries) {
-                st.setInt(1, ++seq);
-                st.setString(2, e.hash());
-                st.setObject(3, LocalDateTime.parse(e.start()));
-                st.setString(4, e.text());
-                st.setString(5, e.from());
-                st.setString(6, e.to());
-                if (e.departure() == null) st.setNull(7, Types.TIMESTAMP);
-                else st.setObject(7, LocalDateTime.parse(e.departure()));
-                st.addBatch();
+            "SELECT coalesce(max(seq), 0) FROM flights WHERE user_id = ?")) {
+            st.setLong(1, userId);
+            try (ResultSet rs = st.executeQuery()) {
+                return rs.next() ? rs.getInt(1) + 1 : 1;
             }
-            st.executeBatch();
         }
     }
 }

@@ -1,3 +1,17 @@
 target/
 .DS_Store
 *.log
+
+# ── Secrets ──────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Per-install data (never commit real schedules or client names) ──
+data/flights.json
+data/*.local.*
+data/deadhead.db
+data/deadhead.db-*
+private-backup/

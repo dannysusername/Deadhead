@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create an account — Deadhead</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="card">
+  <div class="brand">Deadhead ✈️</div>
+
+  <h1>Create your account</h1>
+
+  <div id="msg" class="msg err" hidden></div>
+
+  <form id="form" novalidate>
+    <label>
+      <span class="lbl">Email</span>
+      <input type="email" id="email" name="email" autocomplete="username"
+             required autofocus spellcheck="false">
+    </label>
+    <label>
+      <span class="lbl">Password</span>
+      <input type="password" id="password" name="password"
+             autocomplete="new-password" required minlength="10">
+    </label>
+    <p class="hint">At least 10 characters. A phrase you'll remember beats a short scramble.</p>
+    <label>
+      <span class="lbl">Confirm password</span>
+      <input type="password" id="confirm" autocomplete="new-password" required>
+    </label>
+    <button type="submit" id="go">Create account</button>
+  </form>
+
+  <p class="alt">Already have one? <a href="/login">Sign in</a></p>
+  <p class="foot">Your calendar can hold client names. It is stored against your
+    account only, and no other account can read it.</p>
+</main>
+
+<script>
+const form = document.getElementById('form');
+const msg = document.getElementById('msg');
+const go = document.getElementById('go');
+
+function fail(text) {
+  msg.className = 'msg err';
+  msg.textContent = text;
+  msg.hidden = false;
+}
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  msg.hidden = true;
+
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+
+  if (password !== document.getElementById('confirm').value) return fail('Those passwords don’t match.');
+  if (password.length < 10) return fail('Use a password of at least 10 characters.');
+
+  go.disabled = true;
+  go.textContent = 'Creating…';
+  try {
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!res.ok) {
+      const problem = await res.json().catch(() => ({}));
+      throw new Error(problem.detail || 'Could not create that account.');
+    }
+    const body = await res.json();
+    // The server signs the new account in; if that didn't take, the login page will.
+    location.href = body.signedIn === 'true' ? '/' : '/login?registered';
+  } catch (err) {
+    fail(err.message);
+    go.disabled = false;
+    go.textContent = 'Create account';
+  }
+});
+</script>
+</body>
+</html>

@@ -2,11 +2,7 @@ package deadhead;
 
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -17,23 +13,31 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The saved-flights database, held in memory and persisted by {@link FlightRepo}.
+ * One account's saved flights, read straight from {@link FlightRepo}.
+ *
  * Every calendar event is parsed exactly once and cached by a hash of its
  * content — re-importing the same calendar costs nothing, and new events are
  * the only ones parsed.
  *
  * Parsing strategy per event: try the "X04 to TMB" / "VDF->07FA" pattern
  * first (free), fall back to Claude only for titles the pattern can't read.
+ *
+ * Nothing here is cached across requests on purpose: with many accounts, a
+ * process-wide cache is a cross-tenant leak waiting to happen, and one
+ * indexed query per request is cheaper than being careful.
  */
 @Service
 public class FlightStore {
 
     /** One calendar event, parsed. departure == null means "not a flight". */
-    record Entry(String hash, String start, String text, String from, String to, String departure) {}
+    public record Entry(String hash, String start, String text, String from, String to, String departure) {}
 
     public record ImportStats(int events, int newEvents, int newFlights, int aiParsed) {}
 
@@ -41,76 +45,94 @@ public class FlightStore {
 
     private final AirportDb db;
     private final FlightRepo repo;
-    private final Map<String, Entry> entries = new LinkedHashMap<>();
+    private final CalendarParser claude;
 
-    public FlightStore(AirportDb db, FlightRepo repo) throws IOException {
+    /** One import at a time per account: reading the seen-hashes then writing is not atomic. */
+    private final Map<Long, Lock> importLocks = new ConcurrentHashMap<>();
+
+    public FlightStore(AirportDb db, FlightRepo repo, CalendarParser claude) {
         this.db = db;
         this.repo = repo;
-        for (Entry e : repo.load()) {
-            entries.put(e.hash(), e);
-        }
+        this.claude = claude;
     }
 
     // ── import ───────────────────────────────────────────────────
 
-    public synchronized ImportStats importIcs(String ics, Airport home) throws IOException {
+    /**
+     * @param apiKey the pilot's own Anthropic key, or null. Without one, titles
+     *               the airport-code pattern can't read are cached as
+     *               not-flights — the import still succeeds, it just sees less.
+     */
+    public ImportStats importIcs(long userId, String ics, Airport home, String apiKey) {
         List<IcsParser.Event> events = IcsParser.parse(ics);
         if (events.isEmpty()) throw new IllegalArgumentException("No events found in that file.");
 
-        List<IcsParser.Event> fresh = events.stream()
-            .filter(e -> !entries.containsKey(hash(e)))
-            .toList();
+        Lock lock = importLocks.computeIfAbsent(userId, id -> new ReentrantLock());
+        lock.lock();
+        try {
+            var seen = new java.util.HashSet<String>();
+            for (Entry e : repo.load(userId)) seen.add(e.hash());
 
-        int flights = 0, aiParsed = 0;
-        List<IcsParser.Event> forClaude = new ArrayList<>();
+            List<IcsParser.Event> fresh = events.stream()
+                .filter(e -> !seen.contains(hash(e)))
+                .toList();
 
-        for (IcsParser.Event e : fresh) {
-            String[] codes = codePattern(e.text());
-            if (codes != null) {
-                put(e, codes[0], codes[1]);
-                flights++;
+            Map<String, Entry> added = new LinkedHashMap<>();
+            int flights = 0, aiParsed = 0;
+            List<IcsParser.Event> forClaude = new ArrayList<>();
+
+            for (IcsParser.Event e : fresh) {
+                String[] codes = codePattern(e.text());
+                if (codes != null) {
+                    added.put(hash(e), flight(e, codes[0], codes[1]));
+                    flights++;
+                } else {
+                    forClaude.add(e);
+                }
+            }
+
+            if (!forClaude.isEmpty() && CalendarParser.looksLikeKey(apiKey)) {
+                for (int i = 0; i < forClaude.size(); i += AI_BATCH) {
+                    List<IcsParser.Event> batch =
+                        forClaude.subList(i, Math.min(i + AI_BATCH, forClaude.size()));
+                    flights += parseWithClaude(apiKey, batch, home, added);
+                    aiParsed += batch.size();
+                }
             } else {
-                forClaude.add(e);
+                for (IcsParser.Event e : forClaude) added.put(hash(e), notFlight(e));
             }
-        }
 
-        if (!forClaude.isEmpty() && System.getenv("ANTHROPIC_API_KEY") != null) {
-            for (int i = 0; i < forClaude.size(); i += AI_BATCH) {
-                List<IcsParser.Event> batch = forClaude.subList(i, Math.min(i + AI_BATCH, forClaude.size()));
-                int[] counts = parseWithClaude(batch, home);
-                flights += counts[0];
-                aiParsed += counts[1];
-            }
-        } else {
-            forClaude.forEach(e -> putNotFlight(e));   // no key: assume not flights
+            repo.add(userId, added.values());
+            return new ImportStats(events.size(), fresh.size(), flights, aiParsed);
+        } finally {
+            lock.unlock();
         }
-
-        save();
-        return new ImportStats(events.size(), fresh.size(), flights, aiParsed);
     }
 
-    /** Returns {flightsAdded, eventsSentToClaude}. Events Claude skips are cached as not-flights. */
-    private int[] parseWithClaude(List<IcsParser.Event> batch, Airport home) {
+    /** Returns the number of flights found. Events Claude skips are cached as not-flights. */
+    private int parseWithClaude(String apiKey, List<IcsParser.Event> batch,
+                                Airport home, Map<String, Entry> into) {
         List<String> lines = new ArrayList<>();
         for (int i = 0; i < batch.size(); i++) {
             lines.add(i + " | " + batch.get(i).start() + " | " + batch.get(i).text());
         }
-        CalendarParser.ParsedFlights parsed = CalendarParser.parse(lines, home);
+        CalendarParser.ParsedFlights parsed = claude.parse(apiKey, lines, home);
 
         boolean[] isFlight = new boolean[batch.size()];
         int flights = 0;
         for (CalendarParser.ParsedFlight f : parsed.flights()) {
             if (f.event() < 0 || f.event() >= batch.size()) continue;
             try {
-                put(batch.get(f.event()), db.resolve(f.from()).ident(), db.resolve(f.to()).ident());
+                IcsParser.Event e = batch.get(f.event());
+                into.put(hash(e), flight(e, db.resolve(f.from()).ident(), db.resolve(f.to()).ident()));
                 isFlight[f.event()] = true;
                 flights++;
             } catch (IllegalArgumentException ignored) { }   // model invented a code: skip
         }
         for (int i = 0; i < batch.size(); i++) {
-            if (!isFlight[i]) putNotFlight(batch.get(i));
+            if (!isFlight[i]) into.put(hash(batch.get(i)), notFlight(batch.get(i)));
         }
-        return new int[]{flights, batch.size()};
+        return flights;
     }
 
     /** "X04 to TMB | Client" / "VDF->07FA | Client" -> {KX04-ident, KTMB-ident}, else null. */
@@ -129,16 +151,12 @@ public class FlightStore {
         return null;
     }
 
-    private void put(IcsParser.Event e, String from, String to) {
-        entries.put(hash(e), new Entry(hash(e), e.start().toString(), e.text(), from, to, e.start().toString()));
+    private static Entry flight(IcsParser.Event e, String from, String to) {
+        return new Entry(hash(e), e.start().toString(), e.text(), from, to, e.start().toString());
     }
 
-    private void putNotFlight(IcsParser.Event e) {
-        entries.put(hash(e), new Entry(hash(e), e.start().toString(), e.text(), null, null, null));
-    }
-
-    private void save() throws IOException {
-        repo.save(entries.values());
+    private static Entry notFlight(IcsParser.Event e) {
+        return new Entry(hash(e), e.start().toString(), e.text(), null, null, null);
     }
 
     private static String hash(IcsParser.Event e) {
@@ -157,8 +175,8 @@ public class FlightStore {
     public record FlightView(String id, String departure, String from, String to,
                              String text, boolean conflict) {}
 
-    public synchronized List<FlightView> flightsBetween(LocalDate from, LocalDate to) {
-        List<Entry> inRange = flightEntries().stream()
+    public List<FlightView> flightsBetween(long userId, LocalDate from, LocalDate to) {
+        List<Entry> inRange = flightEntries(userId).stream()
             .filter(e -> {
                 LocalDate d = LocalDateTime.parse(e.departure()).toLocalDate();
                 return !d.isBefore(from) && !d.isAfter(to);
@@ -179,10 +197,11 @@ public class FlightStore {
     }
 
     /** The picker's checked flights, as trips for the optimizer. */
-    public synchronized List<Trip> tripsForIds(List<String> ids) {
+    public List<Trip> tripsForIds(long userId, List<String> ids) {
+        Map<String, Entry> byId = byId(userId);
         List<Trip> trips = new ArrayList<>();
         for (String id : ids) {
-            Entry e = entries.get(id);
+            Entry e = byId.get(id);
             if (e == null || e.departure() == null) continue;
             trips.add(new Trip(id, new Airport(e.from()), new Airport(e.to()),
                 LocalDateTime.parse(e.departure())));
@@ -191,39 +210,51 @@ public class FlightStore {
         return trips;
     }
 
-    /** Human label for error messages ("TMB->EYW | Client"). */
-    public synchronized String label(String id) {
-        Entry e = entries.get(id);
-        return e == null ? id : e.text();
+    /** Human labels for error messages ("TMB->EYW | Scott L."), fetched in one pass. */
+    public Map<String, String> labels(long userId) {
+        Map<String, String> out = new LinkedHashMap<>();
+        byId(userId).forEach((id, e) -> out.put(id, e.text()));
+        return out;
     }
 
     /** Where the schedule says the plane is: the latest arrival before `now`. */
-    public synchronized java.util.Optional<String> lastArrivalBefore(LocalDateTime now) {
-        return flightEntries().stream()
+    public java.util.Optional<String> lastArrivalBefore(long userId, LocalDateTime now) {
+        return flightEntries(userId).stream()
             .filter(e -> LocalDateTime.parse(e.departure()).isBefore(now))
             .max(Comparator.comparing(Entry::departure))
             .map(Entry::to);
     }
 
-    public synchronized java.util.Optional<LocalDateTime> lastDepartureBefore(LocalDateTime now) {
-        return flightEntries().stream()
+    public java.util.Optional<LocalDateTime> lastDepartureBefore(long userId, LocalDateTime now) {
+        return flightEntries(userId).stream()
             .map(e -> LocalDateTime.parse(e.departure()))
             .filter(d -> d.isBefore(now))
             .max(Comparator.naturalOrder());
     }
 
     /** Mondays of every week that has at least one flight, sorted. */
-    public synchronized List<LocalDate> weeksWithFlights() {
-        return flightEntries().stream()
+    public List<LocalDate> weeksWithFlights(long userId) {
+        return flightEntries(userId).stream()
             .map(e -> LocalDateTime.parse(e.departure()).toLocalDate().with(DayOfWeek.MONDAY))
             .distinct().sorted().toList();
     }
 
-    public synchronized int flightCount() {
-        return flightEntries().size();
+    public int flightCount(long userId) {
+        return flightEntries(userId).size();
     }
 
-    private List<Entry> flightEntries() {
-        return entries.values().stream().filter(e -> e.departure() != null).toList();
+    /** Forget everything imported for this account. */
+    public void clear(long userId) {
+        repo.deleteAll(userId);
+    }
+
+    private Map<String, Entry> byId(long userId) {
+        Map<String, Entry> out = new LinkedHashMap<>();
+        for (Entry e : repo.load(userId)) out.put(e.hash(), e);
+        return out;
+    }
+
+    private List<Entry> flightEntries(long userId) {
+        return repo.load(userId).stream().filter(e -> e.departure() != null).toList();
     }
 }

@@ -11,15 +11,19 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Trips -> optimal week plan. */
+/**
+ * Trips -> optimal week plan.
+ *
+ * Stateless: the caller passes in the signed-in pilot's own numbers, so two
+ * accounts planning at the same moment can hold different fuel prices, home
+ * bases and time values without knowing about each other.
+ */
 @Service
 public class PlanService {
 
-    private final Properties cfg;
     private final AirportDb db;
 
-    public PlanService(Properties costs, AirportDb airportDb) {
-        this.cfg = costs;
+    public PlanService(AirportDb airportDb) {
         this.db = airportDb;
     }
 
@@ -28,8 +32,9 @@ public class PlanService {
     public record PlanView(long total, List<Step> steps) {}
     public record Result(List<String> airports, long savings, PlanView optimal, PlanView habit) {}
 
-    public String defaultHome() {
-        return cfg.getProperty("home", "KTMB").toUpperCase().trim();
+    /** The pilot's saved home base, or empty if they haven't set one yet. */
+    public String defaultHome(Properties cfg) {
+        return cfg.getProperty("home", "").toUpperCase().trim();
     }
 
     /** Normalize any code (TMB / KTMB / IATA) to one canonical airport. */
@@ -41,7 +46,8 @@ public class PlanService {
      * Catch physically impossible selections BEFORE the solver runs, and name
      * the clash — "no feasible plan" explains nothing; this does.
      */
-    public void precheck(List<Trip> trips, java.util.function.Function<String, String> label, Airport home) {
+    public void precheck(List<Trip> trips, java.util.function.Function<String, String> label,
+                         Airport home, Properties cfg) {
         GeoCostModel costs = new GeoCostModel(db, home, cfg);
         for (int i = 0; i + 1 < trips.size(); i++) {
             Trip a = trips.get(i), b = trips.get(i + 1);
@@ -63,7 +69,7 @@ public class PlanService {
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("EEE HH:mm");
 
-    public Result plan(List<Trip> trips, Airport home, Airport planeAt) {
+    public Result plan(List<Trip> trips, Airport home, Airport planeAt, Properties cfg) {
         Set<Airport> airports = new HashSet<>();
         airports.add(home);
         airports.add(planeAt);   // the plane may start stranded somewhere from last week
@@ -74,7 +80,7 @@ public class PlanService {
         RoutePlanner router = new RoutePlanner(planner);
 
         // Start a day early: if the plane isn't where the first trip departs,
-        // dad needs time to go fetch it.
+        // the pilot needs time to go fetch it.
         LocalDateTime weekStart = trips.get(0).departure().minusDays(1).toLocalDate().atTime(8, 0);
         State start = new State(planeAt, home, weekStart,
             trips.stream().map(Trip::id).collect(Collectors.toUnmodifiableSet()));

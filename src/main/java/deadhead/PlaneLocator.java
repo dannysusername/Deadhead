@@ -25,20 +25,18 @@ public class PlaneLocator {
 
     public record Location(String airport, String name, String source) {}
 
-    private final Properties cfg;
     private final AirportDb db;
     private final FlightStore store;
     private final ObjectMapper json = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(8)).build();
 
-    public PlaneLocator(Properties costs, AirportDb db, FlightStore store) {
-        this.cfg = costs;
+    public PlaneLocator(AirportDb db, FlightStore store) {
         this.db = db;
         this.store = store;
     }
 
-    public Location locate() {
+    public Location locate(long userId, Properties cfg) {
         String tail = cfg.getProperty("tail", "").trim();
         String hex = cfg.getProperty("hex", "").trim().toLowerCase();
 
@@ -46,7 +44,7 @@ public class PlaneLocator {
             Optional<Location> live = liveAdsb(tail, hex);
             if (live.isPresent()) return live.get();
         }
-        Optional<Location> scheduled = fromSchedule();
+        Optional<Location> scheduled = fromSchedule(userId, cfg);
         if (scheduled.isPresent()) return scheduled.get();
 
         throw new IllegalArgumentException(
@@ -81,9 +79,9 @@ public class PlaneLocator {
      * scheduled arrival is only trustworthy while it's fresh. After that,
      * the plane has almost certainly been repositioned: assume home base.
      */
-    private Optional<Location> fromSchedule() {
-        Optional<String> last = store.lastArrivalBefore(LocalDateTime.now());
-        Optional<LocalDateTime> when = store.lastDepartureBefore(LocalDateTime.now());
+    private Optional<Location> fromSchedule(long userId, Properties cfg) {
+        Optional<String> last = store.lastArrivalBefore(userId, LocalDateTime.now());
+        Optional<LocalDateTime> when = store.lastDepartureBefore(userId, LocalDateTime.now());
 
         if (last.isPresent() && when.isPresent()
                 && when.get().isAfter(LocalDateTime.now().minusHours(36))) {

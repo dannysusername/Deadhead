@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * Looks up airports in the OurAirports public-domain database
- * (data/airports.csv) so any code dad writes in his calendar just works:
+ * (data/airports.csv) so any code a pilot writes in their calendar just works:
  * ICAO ("KADS"), local ("ADS"), or IATA ("DAL").
  */
 public class AirportDb {

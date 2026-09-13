@@ -4,10 +4,10 @@ import java.time.Duration;
 import java.util.Properties;
 
 /**
- * Cost model computed from geography + dad's numbers (costs.properties).
+ * Cost model computed from geography + this pilot's own saved numbers.
  * No hand-entered leg table: flight time comes from great-circle distance at
  * cruise speed, drive time from an estimated road distance. Every knob lives
- * in the properties file so tuning never means recompiling.
+ * in their settings, so tuning never means recompiling.
  */
 public class GeoCostModel implements CostModel {
 

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Deadhead</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="card">
+  <div class="brand">Deadhead ✈️</div>
+
+  <h1>Sign in</h1>
+  <p class="sub">Your schedule and your numbers, kept to your account.</p>
+
+  <div id="msg" class="msg err" hidden></div>
+
+  <!-- Posts to Spring Security's filter, so this is a plain form: it works
+       with the browser's password manager and without JavaScript. -->
+  <form method="post" action="/login">
+    <label>
+      <span class="lbl">Email</span>
+      <input type="email" name="username" autocomplete="username"
+             required autofocus spellcheck="false">
+    </label>
+    <label>
+      <span class="lbl">Password</span>
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <input type="hidden" name="_csrf" id="csrf">
+    <button type="submit">Sign in</button>
+  </form>
+
+  <p class="alt">No account yet? <a href="/register">Create one</a></p>
+</main>
+
+<script>
+// The CSRF cookie is set by the server on this GET; the form echoes it back.
+const token = document.cookie.split('; ').find(c => c.startsWith('XSRF-TOKEN='));
+if (token) document.getElementById('csrf').value = decodeURIComponent(token.split('=').slice(1).join('='));
+
+const params = new URLSearchParams(location.search);
+const msg = document.getElementById('msg');
+if (params.has('error')) {
+  msg.textContent = 'That email and password don’t match an account.';
+  msg.hidden = false;
+} else if (params.has('bye')) {
+  msg.className = 'msg ok';
+  msg.textContent = 'Signed out.';
+  msg.hidden = false;
+} else if (params.has('registered')) {
+  msg.className = 'msg ok';
+  msg.textContent = 'Account created — sign in to get started.';
+  msg.hidden = false;
+}
+</script>
+</body>
+</html>

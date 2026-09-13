@@ -1,4 +1,4 @@
-# Dad's week — copy flights from the calendar, one per line.
+# Sample week — one flight per line.
 # Format: from,to,date,departure-time
 # Airport codes: local (ADS), ICAO (KADS), or IATA (DAL) all work.
 

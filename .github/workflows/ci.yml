@@ -44,6 +44,8 @@ jobs:
 
       - name: Build with Maven
         run: mvn -B -DskipTests package
+      - name: Run Unit Tests # main is what gets deployed — it does not skip tests
+        run: mvn -B test
       - name: Deploy to Heroku # Uses the HEROKU_API_KEY secret stored on GitHub secrets to authenticate and deploys to Heroku
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
