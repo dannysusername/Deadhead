@@ -2,7 +2,7 @@
 
 **Deadhead is live — just open it in your browser:**
 
-### 👉 https://deadhead-planner-71dc1c210944.herokuapp.com/login
+### 👉 https://deadhead.danielibarra.com
 
 No install, no setup, nothing to download. Create an account with an email and a password (10+ characters) and you're in. Everything below is for people who want to *develop* Deadhead; if you just want to *use* it, the link above is all you need.
 
@@ -82,7 +82,7 @@ push to main
 
 | Environment | App | URL |
 |---|---|---|
-| Production | `deadhead-planner` | https://deadhead-planner-71dc1c210944.herokuapp.com/login |
+| Production | `deadhead-planner` | https://deadhead.danielibarra.com |
 
 - **A merge to `main` is a production deploy** — there is no staging app. Tests run first, and a failure stops the push.
 - Deploy auth is the `HEROKU_API_KEY` GitHub Actions secret. Heroku runs `java -jar target/deadhead-0.1.0.jar` (`Procfile`) on Java 21 (`system.properties`).
